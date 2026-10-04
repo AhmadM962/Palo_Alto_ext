@@ -1,22 +1,8 @@
-const SHOT_MIN_INTERVAL_MS = 700;
-let lastShotAt = 0;
-
 function getState() {
   return chrome.storage.local.get(['scormSession', 'scormCaptures']).then((r) => ({
     session: r.scormSession || null,
     captures: r.scormCaptures || []
   }));
-}
-
-function takeScreenshot(tabId, filename) {
-  if (tabId == null) return;
-  chrome.tabs.get(tabId, (tab) => {
-    if (chrome.runtime.lastError || !tab) return;
-    chrome.tabs.captureVisibleTab(tab.windowId, { format: 'png' }, (dataUrl) => {
-      if (chrome.runtime.lastError || !dataUrl) return;
-      chrome.downloads.download({ url: dataUrl, filename, saveAs: false });
-    });
-  });
 }
 
 chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
@@ -46,25 +32,15 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
         sendResponse({ ok: false, reason: 'not recording' });
         return;
       }
-      const tabId = sender.tab ? sender.tab.id : null;
-      const captureId = `${session.id}_${captures.length}`;
-      const record = {
-        id: captureId,
+      captures.push({
         lesson: session.label,
+        index: captures.length,
         frameUrl: msg.frameUrl,
         trigger: msg.trigger,
         text: msg.text,
-        timestamp: msg.timestamp,
-        screenshot: `${session.id}/${captureId}.png`
-      };
-      captures.push(record);
+        timestamp: msg.timestamp
+      });
       await chrome.storage.local.set({ scormCaptures: captures });
-
-      const now = Date.now();
-      const wait = Math.max(0, SHOT_MIN_INTERVAL_MS - (now - lastShotAt));
-      lastShotAt = now + wait;
-      setTimeout(() => takeScreenshot(tabId, `scorm-capture/${record.screenshot}`), wait);
-
       sendResponse({ ok: true, count: captures.length });
       return;
     }
@@ -75,12 +51,18 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
         sendResponse({ ok: false, error: 'No captures yet' });
         return;
       }
-      const jsonl = captures.map((c) => JSON.stringify(c)).join('\n');
-      const blob = new Blob([jsonl], { type: 'application/json' });
+      const body = captures
+        .map((c) => {
+          const when = new Date(c.timestamp).toISOString();
+          const trigger = c.trigger || '(initial load)';
+          return `### ${c.lesson} | state ${c.index} | trigger: ${trigger} | ${when}\n${c.text}\n`;
+        })
+        .join('\n');
+      const blob = new Blob([body], { type: 'text/plain' });
       const url = URL.createObjectURL(blob);
-      const sid = session ? session.id : captures[0].screenshot.split('/')[0];
+      const sid = session ? session.id : `session_${Date.now()}`;
       chrome.downloads.download(
-        { url, filename: `scorm-capture/${sid}/export.jsonl`, saveAs: false },
+        { url, filename: `scorm-capture/${sid}.txt`, saveAs: false },
         () => {
           URL.revokeObjectURL(url);
           sendResponse({ ok: true, count: captures.length });
