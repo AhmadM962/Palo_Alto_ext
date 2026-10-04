@@ -2,7 +2,7 @@
   if (window.__scormExtractorActive) return;
   window.__scormExtractorActive = true;
 
-  const DEBOUNCE_MS = 500;
+  const DEBOUNCE_MS = 1200;
   let debounceTimer = null;
   let lastTrigger = null;
   let lastTextHash = null;

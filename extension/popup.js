@@ -20,37 +20,38 @@ document.getElementById('start').addEventListener('click', async () => {
   const label = document.getElementById('label').value.trim() || 'untitled';
 
   const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
-  if (!tab || !tab.url) {
-    setStatus('could not read this tab — open the lesson page first', false);
+  if (!tab) {
+    setStatus('could not find the active tab', false);
     return;
   }
 
-  let origin;
-  try {
-    origin = new URL(tab.url).origin + '/*';
-  } catch {
-    setStatus('this page cannot be captured', false);
-    return;
-  }
-
+  // SCORM content is frequently served from a different subdomain/origin
+  // than the LMS shell (sandboxing), so the permission and the registered
+  // content script both need to cover every origin, not just the tab's own.
   const granted =
-    (await chrome.permissions.contains({ origins: [origin] })) ||
-    (await chrome.permissions.request({ origins: [origin] }));
+    (await chrome.permissions.contains({ origins: ['<all_urls>'] })) ||
+    (await chrome.permissions.request({ origins: ['<all_urls>'] }));
   if (!granted) {
     setStatus('permission denied — cannot read page content without it', false);
     return;
   }
 
   // Register so the content script re-injects automatically on every future
-  // navigation on this site (SCORM lessons often swap iframe pages, which
-  // destroys a one-shot injected script), then inject into frames already
-  // open right now.
+  // navigation anywhere (SCORM lessons often swap iframe pages, or load the
+  // actual lesson content from a different origin than the shell, either of
+  // which destroys a one-shot injected script), then inject into frames
+  // already open right now.
+  const scriptConfig = {
+    id: 'scorm-extractor',
+    js: ['content.js'],
+    matches: ['<all_urls>'],
+    allFrames: true,
+    runAt: 'document_idle'
+  };
   try {
-    await chrome.scripting.registerContentScripts([
-      { id: 'scorm-extractor', js: ['content.js'], matches: [origin], allFrames: true, runAt: 'document_idle' }
-    ]);
+    await chrome.scripting.registerContentScripts([scriptConfig]);
   } catch {
-    // already registered for this origin from a previous session — fine
+    await chrome.scripting.updateContentScripts([scriptConfig]).catch(() => {});
   }
   await chrome.scripting.executeScript({
     target: { tabId: tab.id, allFrames: true },

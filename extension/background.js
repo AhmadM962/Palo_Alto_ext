@@ -69,7 +69,7 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
         .map((c) => {
           const when = new Date(c.timestamp).toISOString();
           const trigger = c.trigger || '(initial load)';
-          return `### ${c.lesson} | state ${c.index} | trigger: ${trigger} | ${when}\n${c.text}\n`;
+          return `### ${c.lesson} | state ${c.index} | frame: ${c.frameUrl} | trigger: ${trigger} | ${when}\n${c.text}\n`;
         })
         .join('\n');
       // A blob: URL created in a service worker can go stale by the time
