@@ -1,0 +1,14 @@
+{
+  "manifest_version": 3,
+  "name": "SCORM Content Extractor",
+  "version": "1.0.0",
+  "description": "Captures DOM text and screenshots from SCORM lessons, including every interactive/clickable state, as AI-ready JSONL.",
+  "permissions": ["activeTab", "scripting", "storage", "unlimitedStorage", "downloads", "tabs"],
+  "optional_host_permissions": ["<all_urls>"],
+  "action": {
+    "default_popup": "popup.html"
+  },
+  "background": {
+    "service_worker": "background.js"
+  }
+}
