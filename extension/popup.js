@@ -1,5 +1,7 @@
-function setStatus(text) {
-  document.getElementById('status').textContent = text;
+function setStatus(text, recording) {
+  const el = document.getElementById('status');
+  el.textContent = text;
+  el.className = recording ? 'recording' : 'idle';
 }
 
 function refreshStatus() {
@@ -7,8 +9,9 @@ function refreshStatus() {
     if (!res) return;
     setStatus(
       res.session
-        ? `recording "${res.session.label}" — ${res.count} states captured`
-        : `idle — ${res.count} states in buffer`
+        ? `● recording "${res.session.label}" — ${res.count} states captured`
+        : `idle — ${res.count} states in buffer`,
+      !!res.session
     );
   });
 }
@@ -16,24 +19,45 @@ function refreshStatus() {
 document.getElementById('start').addEventListener('click', async () => {
   const label = document.getElementById('label').value.trim() || 'untitled';
 
-  const granted =
-    (await chrome.permissions.contains({ origins: ['<all_urls>'] })) ||
-    (await chrome.permissions.request({ origins: ['<all_urls>'] }));
-  if (!granted) {
-    setStatus('permission denied — cannot read iframe content without it');
+  const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
+  if (!tab || !tab.url) {
+    setStatus('could not read this tab — open the lesson page first', false);
     return;
   }
 
-  const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
-  if (!tab) return;
+  let origin;
+  try {
+    origin = new URL(tab.url).origin + '/*';
+  } catch {
+    setStatus('this page cannot be captured', false);
+    return;
+  }
 
-  chrome.runtime.sendMessage({ type: 'scorm-start', label }, async () => {
-    await chrome.scripting.executeScript({
-      target: { tabId: tab.id, allFrames: true },
-      files: ['content.js']
-    });
-    refreshStatus();
+  const granted =
+    (await chrome.permissions.contains({ origins: [origin] })) ||
+    (await chrome.permissions.request({ origins: [origin] }));
+  if (!granted) {
+    setStatus('permission denied — cannot read page content without it', false);
+    return;
+  }
+
+  // Register so the content script re-injects automatically on every future
+  // navigation on this site (SCORM lessons often swap iframe pages, which
+  // destroys a one-shot injected script), then inject into frames already
+  // open right now.
+  try {
+    await chrome.scripting.registerContentScripts([
+      { id: 'scorm-extractor', js: ['content.js'], matches: [origin], allFrames: true, runAt: 'document_idle' }
+    ]);
+  } catch {
+    // already registered for this origin from a previous session — fine
+  }
+  await chrome.scripting.executeScript({
+    target: { tabId: tab.id, allFrames: true },
+    files: ['content.js']
   });
+
+  chrome.runtime.sendMessage({ type: 'scorm-start', label }, refreshStatus);
 });
 
 document.getElementById('stop').addEventListener('click', () => {
@@ -42,7 +66,8 @@ document.getElementById('stop').addEventListener('click', () => {
 
 document.getElementById('export').addEventListener('click', () => {
   chrome.runtime.sendMessage({ type: 'scorm-export' }, (res) => {
-    setStatus(res && res.ok ? `exported ${res.count} states` : `export failed: ${res && res.error}`);
+    const recording = document.getElementById('status').className === 'recording';
+    setStatus(res && res.ok ? `exported ${res.count} states` : `export failed: ${res && res.error}`, recording);
   });
 });
 

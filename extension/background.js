@@ -5,17 +5,31 @@ function getState() {
   }));
 }
 
+function setBadge(recording) {
+  chrome.action.setBadgeText({ text: recording ? 'REC' : '' });
+  if (recording) chrome.action.setBadgeBackgroundColor({ color: '#d32f2f' });
+}
+
+// Badge state doesn't survive a full browser restart, so re-apply it
+// whenever the browser starts back up with a session still marked active.
+chrome.runtime.onStartup.addListener(async () => {
+  const { session } = await getState();
+  setBadge(!!session);
+});
+
 chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
   (async () => {
     if (msg.type === 'scorm-start') {
       const session = { id: `session_${Date.now()}`, label: msg.label || 'untitled', startedAt: Date.now() };
       await chrome.storage.local.set({ scormSession: session, scormCaptures: [] });
+      setBadge(true);
       sendResponse({ ok: true, session });
       return;
     }
 
     if (msg.type === 'scorm-stop') {
       await chrome.storage.local.set({ scormSession: null });
+      setBadge(false);
       sendResponse({ ok: true });
       return;
     }
@@ -58,13 +72,15 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
           return `### ${c.lesson} | state ${c.index} | trigger: ${trigger} | ${when}\n${c.text}\n`;
         })
         .join('\n');
-      const blob = new Blob([body], { type: 'text/plain' });
-      const url = URL.createObjectURL(blob);
+      // A blob: URL created in a service worker can go stale by the time
+      // chrome.downloads.download actually reads it (MV3 service workers are
+      // ephemeral), which makes the download silently fail. A data: URL has
+      // no such lifetime and is reliable here for text-sized payloads.
+      const url = 'data:text/plain;charset=utf-8,' + encodeURIComponent(body);
       const sid = session ? session.id : `session_${Date.now()}`;
       chrome.downloads.download(
         { url, filename: `scorm-capture/${sid}.txt`, saveAs: false },
         (downloadId) => {
-          URL.revokeObjectURL(url);
           if (chrome.runtime.lastError || downloadId == null) {
             sendResponse({
               ok: false,

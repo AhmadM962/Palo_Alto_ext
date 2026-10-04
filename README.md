@@ -8,9 +8,14 @@ a single plain-text file ready to feed to an AI summarizer.
 
 - `extension/` is an unpacked Chrome (MV3) extension. It does nothing until
   you click **Start Capture** on a tab — it then asks for one-time
-  permission to read all frames on that tab (needed because SCORM content is
-  often rendered inside a cross-origin iframe), injects a content script
-  into every frame, and watches the DOM with a `MutationObserver`.
+  permission to read that site (needed because SCORM content is often
+  rendered inside a cross-origin iframe and/or Shadow DOM), registers the
+  content script to auto-inject into every frame of that site from then on
+  (so it survives the lesson navigating to a new page/iframe, not just the
+  frame that was open at the moment you clicked Start), and watches the DOM
+  with a `MutationObserver` that also recurses into open shadow roots.
+- While recording, the toolbar icon shows a red **REC** badge so it's always
+  clear whether it's currently capturing.
 - As you click through a lesson normally, every DOM change is captured as a
   new "state": the extracted text and which element you clicked to get there
   (`trigger`). Unchanged/duplicate states are skipped automatically.
@@ -64,5 +69,7 @@ was revealed by a particular button/tab.
   won't be captured — this version does not do OCR.
 - Coverage is only as complete as your clicking — the extension doesn't
   auto-discover or auto-click buttons, it just records whatever you trigger.
-- The granted permission and injected content script are lost on a full
-  page reload/navigation; click **Start Capture** again if that happens.
+- Shadow DOM content only works for **open** shadow roots (the common
+  default). A component using a closed shadow root is unreadable from
+  outside it, by design — if a slide's text still isn't showing up, this is
+  the most likely reason.
