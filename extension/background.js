@@ -63,8 +63,15 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
       const sid = session ? session.id : `session_${Date.now()}`;
       chrome.downloads.download(
         { url, filename: `scorm-capture/${sid}.txt`, saveAs: false },
-        () => {
+        (downloadId) => {
           URL.revokeObjectURL(url);
+          if (chrome.runtime.lastError || downloadId == null) {
+            sendResponse({
+              ok: false,
+              error: chrome.runtime.lastError ? chrome.runtime.lastError.message : 'download did not start'
+            });
+            return;
+          }
           sendResponse({ ok: true, count: captures.length });
         }
       );

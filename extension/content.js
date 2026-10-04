@@ -6,6 +6,7 @@
   let debounceTimer = null;
   let lastTrigger = null;
   let lastTextHash = null;
+  const observedRoots = new WeakSet();
 
   function describeElement(el) {
     if (!el || !el.tagName) return null;
@@ -19,9 +20,25 @@
     return `${tag}${id}${cls}${label ? `:"${label}"` : ''}`.slice(0, 160);
   }
 
-  function extractText() {
-    const parts = [];
-    const walker = document.createTreeWalker(document.body, NodeFilter.SHOW_TEXT, {
+  // Modern course players (e.g. Docebo's component library) render into
+  // Shadow DOM, which a plain document.body walk/observer cannot see into.
+  // Collect document.body plus every open shadow root reachable from it.
+  function allRoots() {
+    const roots = [document.body];
+    const seen = new Set();
+    for (let i = 0; i < roots.length; i++) {
+      roots[i].querySelectorAll('*').forEach((el) => {
+        if (el.shadowRoot && !seen.has(el.shadowRoot)) {
+          seen.add(el.shadowRoot);
+          roots.push(el.shadowRoot);
+        }
+      });
+    }
+    return roots;
+  }
+
+  function extractTextFromRoot(root, parts) {
+    const walker = document.createTreeWalker(root, NodeFilter.SHOW_TEXT, {
       acceptNode(node) {
         const parent = node.parentElement;
         if (!parent) return NodeFilter.FILTER_REJECT;
@@ -37,15 +54,21 @@
     while ((node = walker.nextNode())) {
       parts.push(node.nodeValue.trim());
     }
-    document.querySelectorAll('img[alt]').forEach((img) => {
+    root.querySelectorAll('img[alt]').forEach((img) => {
       const alt = img.alt.trim();
       if (alt) parts.push(`[IMG:${alt}]`);
     });
-    document.querySelectorAll('[aria-label]').forEach((el) => {
+    root.querySelectorAll('[aria-label]').forEach((el) => {
       const label = el.getAttribute('aria-label').trim();
-      if (label && !parts.includes(label)) parts.push(`[ARIA:${label}]`);
+      if (label) parts.push(`[ARIA:${label}]`);
     });
-    return parts.join('\n');
+  }
+
+  function extractText() {
+    const parts = [];
+    allRoots().forEach((root) => extractTextFromRoot(root, parts));
+    const seen = new Set();
+    return parts.filter((p) => (seen.has(p) ? false : (seen.add(p), true))).join('\n');
   }
 
   function hash(str) {
@@ -56,7 +79,15 @@
     return h;
   }
 
+  function observe(root) {
+    if (observedRoots.has(root)) return;
+    observedRoots.add(root);
+    const observer = new MutationObserver(scheduleCapture);
+    observer.observe(root, { childList: true, subtree: true, characterData: true, attributes: true });
+  }
+
   function capture() {
+    allRoots().forEach(observe); // pick up any shadow roots that appeared since the last pass
     const text = extractText();
     const h = hash(text);
     if (h === lastTextHash) return;
@@ -71,24 +102,22 @@
     lastTrigger = null;
   }
 
+  function scheduleCapture() {
+    clearTimeout(debounceTimer);
+    debounceTimer = setTimeout(capture, DEBOUNCE_MS);
+  }
+
   document.addEventListener(
     'click',
     (e) => {
-      lastTrigger = describeElement(e.target);
+      // composedPath()[0] is the true innermost element even when the click
+      // originated inside a shadow root (e.target gets retargeted otherwise).
+      const target = e.composedPath ? e.composedPath()[0] : e.target;
+      lastTrigger = describeElement(target);
     },
     { capture: true }
   );
 
-  const observer = new MutationObserver(() => {
-    clearTimeout(debounceTimer);
-    debounceTimer = setTimeout(capture, DEBOUNCE_MS);
-  });
-  observer.observe(document.body, {
-    childList: true,
-    subtree: true,
-    characterData: true,
-    attributes: true
-  });
-
+  allRoots().forEach(observe);
   setTimeout(capture, DEBOUNCE_MS);
 })();
